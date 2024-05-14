@@ -160,6 +160,8 @@ def get_top_k_embeddings(
     similarity_top_k: t.Optional[int] = None,
     embedding_ids: t.Optional[t.List] = None,
     similarity_cutoff: t.Optional[float] = None,
+    search_results_dict: t.Optional[t.Dict[str, t.Dict[str, float]]] = None,  # New parameter
+    k: int = 60  # New parameter
 ) -> t.Tuple[t.List[float], t.List]:
     """
     Get top nodes by similarity to the query.
@@ -180,13 +182,25 @@ def get_top_k_embeddings(
             heapq.heappush(similarity_heap, (similarity, embedding_ids[i]))
             if similarity_top_k and len(similarity_heap) > similarity_top_k:
                 heapq.heappop(similarity_heap)
-    result_tups = sorted(similarity_heap, key=lambda x: x[0], reverse=True)
+    
+    # Reciprocal Rank Fusion
+    if search_results_dict is not None:
+        fused_scores = {}
+        for query, doc_scores in search_results_dict.items():
+            for rank, (doc, score) in enumerate(sorted(doc_scores.items(), key=lambda x: x[1], reverse=True)):
+                if doc not in fused_scores:
+                    fused_scores[doc] = 0
+                previous_score = fused_scores[doc]
+                fused_scores[doc] += 1 / (rank + k)
+
+        result_tups = sorted([(score, doc) for doc, score in fused_scores.items()], key=lambda x: x[0], reverse=True)
+    else:
+        result_tups = sorted(similarity_heap, key=lambda x: x[0], reverse=True)
 
     result_similarities = [s for s, _ in result_tups]
     result_ids = [n for _, n in result_tups]
 
     return result_similarities, result_ids
-
 
 @dataclass
 class InMemoryDocumentStore(DocumentStore):
