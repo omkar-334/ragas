@@ -8,6 +8,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 
+from scipy.spatial import distance
+from sklearn.feature_extraction.text import TfidfVectorizer
+from typing import List, Union
+
 import numpy as np
 import numpy.typing as npt
 from langchain.text_splitter import TextSplitter
@@ -127,16 +131,19 @@ class DocumentStore(ABC):
 
 class SimilarityMode(str, Enum):
     """Modes for similarity/distance."""
-
     DEFAULT = "cosine"
     DOT_PRODUCT = "dot_product"
     EUCLIDEAN = "euclidean"
-
+    JACCARD = "jaccard"
+    KL_DIVERGENCE = "kl_divergence"
+    JENSEN_SHANNON = "jensen_shannon"
+    SOFT_COSINE = "soft_cosine"
 
 def similarity(
     embedding1: Embedding,
     embedding2: Embedding,
     mode: SimilarityMode = SimilarityMode.DEFAULT,
+    corpus: t.List[str] = None
 ) -> float:
     """Get embedding similarity."""
     if mode == SimilarityMode.EUCLIDEAN:
@@ -144,10 +151,59 @@ def similarity(
         return -float(np.linalg.norm(np.array(embedding1) - np.array(embedding2)))
     elif mode == SimilarityMode.DOT_PRODUCT:
         return np.dot(embedding1, embedding2)
+    elif mode == SimilarityMode.JACCARD:
+        return jaccard_similarity(embedding1, embedding2)
+    elif mode == SimilarityMode.KL_DIVERGENCE:
+        return kl_divergence(embedding1, embedding2)
+    elif mode == SimilarityMode.JENSEN_SHANNON:
+        return jensen_shannon_divergence(embedding1, embedding2)
+    elif mode == SimilarityMode.SOFT_COSINE:
+        return soft_cosine_similarity(embedding1, embedding2, corpus)
     else:
         product = np.dot(embedding1, embedding2)
         norm = np.linalg.norm(embedding1) * np.linalg.norm(embedding2)
         return product / norm
+
+def jaccard_similarity(set1: Embedding, set2: Embedding) -> float:
+    """Calculate Jaccard Similarity between two sets."""
+    intersection = len(set(set1).intersection(set2))
+    union = len(set(set1).union(set2))
+    return intersection / union if union != 0 else 0.0
+
+def kl_divergence(p: Embedding, q: Embedding) -> float:
+    """Calculate KL Divergence between two probability distributions."""
+    p = np.asarray(p)
+    q = np.asarray(q)
+    return np.sum(np.where(p != 0, p * np.log(p / q), 0))
+
+def jensen_shannon_divergence(p: Embedding, q: Embedding):
+    """
+    Calculate the Jensen-Shannon Divergence between two probability distributions.
+    """
+    # Convert probability distributions to numpy arrays
+    p = np.array(p)
+    q = np.array(q)
+    
+    # Calculate the average probability distribution
+    m = 0.5 * (p + q)
+    
+    # Calculate the Jensen-Shannon Divergence
+    jsd = 0.5 * (distance.jensenshannon(p, m) + distance.jensenshannon(q, m))
+    
+    return jsd
+
+def soft_cosine_similarity(doc1, doc2, corpus):
+    """
+    Calculate Soft Cosine Similarity between two documents.
+    """
+    # Convert documents to TF-IDF vectors
+    vectorizer = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = vectorizer.fit_transform(corpus + [doc1, doc2])
+    
+    # Compute soft cosine similarity using word embeddings
+    soft_cosine = embeddings_model.inner_product(tfidf_matrix)[-2, -1]
+    
+    return soft_cosine
 
 
 default_similarity_fns = similarity
